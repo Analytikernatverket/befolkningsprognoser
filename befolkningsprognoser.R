@@ -1,4 +1,4 @@
-### Paket ####      # test för att göra en pull request 
+### Paket ####      # test för att göra en pull request
 library(tidyverse)
 library(pxweb)
 library(purrr)
