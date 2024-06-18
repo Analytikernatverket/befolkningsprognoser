@@ -5,7 +5,7 @@ library(purrr)
 library(data.table)
 library(writexl)
 library(readxl)
-library(zoo)
+library(zoo)            # här lägger jag in en kommentar
 
 #################### FUNKTIONER ###################
 # Funktioner --------------------------------------------------------------
