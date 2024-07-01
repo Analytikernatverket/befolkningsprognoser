@@ -652,9 +652,6 @@ for(year in unique(dödskvoter_riksprognos$År)) {
     
     ### OBS! Här sätter vi den relativa kvoten för HALLAND (90-100 åringar) då gruppen är liten 
     
-    hallands_län_data <- dödskvoter_relativ %>%
-      filter(Region == "Hallands län", Ålder >= 90 & Ålder <= 100, År == year)
-    
     data_region <- dödskvoter_relativ %>% 
       filter(Region == region) %>%
       mutate(
