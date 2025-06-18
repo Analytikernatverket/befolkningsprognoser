@@ -642,8 +642,8 @@ gora_regional_befolkningsprognos <- function(
     invandring_till_riket_prognos,
     lan_namn,
     kommuner,
-    startår = "2025",
-    slutår = "2040"
+    startår,
+    slutår
 ) {
   
   # Initiera resultatstruktur
@@ -889,15 +889,15 @@ regional_befolkningsprognos <- gora_regional_befolkningsprognos(
   invandring_till_riket_prognos = invandring_till_riket_prognos,
   lan_namn = lan_namn,
   kommuner = kommuner,
-  startår = "2025",
-  slutår = "2040"
+  startår = PROGNOS_START,
+  slutår = PROGNOS_SLUT
 )
 
 # Spara resultatet
 if (SCENARIO_ATT_KORA == "alternativ") {
-  output_filename <- "Data_resultat/befolkningsprognos_regional_2025_2040_alternativ.rds"
+  output_filename <- paste0("Data_resultat/befolkningsprognos_regional_", PROGNOS_START, "-", PROGNOS_SLUT, "_alternativ.rds")
 } else {
-  output_filename <- "Data_resultat/befolkningsprognos_regional_2025_2040.rds"
+  output_filename <- paste0("Data_resultat/befolkningsprognos_regional_", PROGNOS_START, "-", PROGNOS_SLUT, ".rds")
 }
 
 saveRDS(regional_befolkningsprognos, output_filename)
@@ -915,7 +915,10 @@ cat("\n=== AVSTÄMNING: LÄNSTOTALER VS KOMMUNSUMMOR ===\n")
 # Skapa avstämningstabell
 avstamning_tabell <- tibble()
 
-for (ar in c("2025", "2030", "2035", "2040")) {
+# skapa en vektor med vart femte år av alla prognosår
+prognos_ar_vektor <- seq(PROGNOS_START, PROGNOS_SLUT, by = 5)
+
+for (ar in prognos_ar_vektor) {
   # Länstotal
   lan_total <- regional_befolkningsprognos[[lan_namn]]$totalbefolkning %>%
     filter(År == ar) %>%
@@ -945,8 +948,11 @@ for (ar in c("2025", "2030", "2035", "2040")) {
 cat("\nTotalbefolkning - avstämning:\n")
 print(avstamning_tabell)
 
+# vi väljer komponentavstämningsår som det 5:e året efter prognosstartåret
+komponentavstamningsar <- as.character(as.numeric(PROGNOS_START) +5)
+
 # Komponentavstämning för ett år
-cat("\n=== KOMPONENTAVSTÄMNING FÖR ÅR 2030 ===\n")
+cat(paste0("\n=== KOMPONENTAVSTÄMNING FÖR ÅR ", komponentavstamningsar, " ===\n"))
 
 komponenter <- c("födda", "döda", "inrikes_inflyttning", "inrikes_utflyttning", 
                  "invandring", "utvandring")
@@ -955,13 +961,13 @@ komponent_avstamning <- tibble()
 
 for (komp in komponenter) {
   # Länstotal
-  lan_komp <- regional_befolkningsprognos[[lan_namn]]$komponenter[["2030"]][[komp]] %>%
+  lan_komp <- regional_befolkningsprognos[[lan_namn]]$komponenter[[komponentavstamningsar]][[komp]] %>%
     summarise(Lan_total = sum(Värde, na.rm = TRUE)) %>%
     pull(Lan_total)
   
   # Kommunsumma
   kommun_komp_summa <- map_dbl(kommuner, function(kommun) {
-    regional_befolkningsprognos[[kommun]]$komponenter[["2030"]][[komp]] %>%
+    regional_befolkningsprognos[[kommun]]$komponenter[[komponentavstamningsar]][[komp]] %>%
       summarise(tot = sum(Värde, na.rm = TRUE)) %>%
       pull(tot)
   }) %>% sum()
@@ -977,7 +983,7 @@ for (komp in komponenter) {
   )
 }
 
-cat("\nKomponenter år 2030:\n")
+cat(paste0("\nKomponenter år ", komponentavstamningsar, ":\n"))
 print(komponent_avstamning)
 
 # Kontroll av avstämning

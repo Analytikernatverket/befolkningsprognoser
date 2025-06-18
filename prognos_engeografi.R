@@ -358,8 +358,8 @@ gora_befolkningsprognos_single <- function(
     riksbefolkning_prognos,
     invandring_till_riket_prognos,
     geografi,
-    startår = "2025",
-    slutår = "2040"
+    startår,
+    slutår
 ) {
   
   # Initiera resultatstruktur
@@ -544,8 +544,8 @@ befolkningsprognos_single <- gora_befolkningsprognos_single(
   riksbefolkning_prognos = riksbefolkning_prognos,
   invandring_till_riket_prognos = invandring_till_riket_prognos,
   geografi = GEOGRAFI_ATT_KORA,
-  startår = "2025",
-  slutår = "2040"
+  startår = PROGNOS_START,
+  slutår = PROGNOS_SLUT
 )
 
 # Skapa filnamn baserat på geografi och scenario
@@ -554,11 +554,11 @@ geografi_filnamn <- gsub(" ", "_", GEOGRAFI_ATT_KORA)
 if (SCENARIO_ATT_KORA == "alternativ") {
   output_filename <- paste0("Data_resultat/befolkningsprognos_", 
                             geografi_filnamn, 
-                            "_2025_2040_alternativ.rds")
+                            "_", PROGNOS_START, "_", PROGNOS_SLUT, "_alternativ.rds")
 } else {
   output_filename <- paste0("Data_resultat/befolkningsprognos_", 
                             geografi_filnamn, 
-                            "_2025_2040.rds")
+                            "_", PROGNOS_START, "_", PROGNOS_SLUT, ".rds")
 }
 
 saveRDS(befolkningsprognos_single, output_filename)
@@ -572,27 +572,29 @@ cat(paste("Scenario:", SCENARIO_ATT_KORA, "\n\n"))
 sammanfattning <- befolkningsprognos_single$sammanfattning
 
 start_bef <- sammanfattning %>%
-  filter(År == "2025") %>%
+  filter(År == PROGNOS_START) %>%
   pull(Total_befolkning)
 
 slut_bef <- sammanfattning %>%
-  filter(År == "2040") %>%
+  filter(År == PROGNOS_SLUT) %>%
   pull(Total_befolkning)
 
 forandring <- slut_bef - start_bef
 procent <- (forandring / start_bef) * 100
 
 cat("Befolkningsutveckling:\n")
-cat(paste0("  2025: ", format(start_bef, big.mark = " "), "\n"))
-cat(paste0("  2040: ", format(slut_bef, big.mark = " "), "\n"))
+cat(paste0("  ", PROGNOS_START, ": ", format(start_bef, big.mark = " "), "\n"))
+cat(paste0("  ", PROGNOS_SLUT, ": ", format(slut_bef, big.mark = " "), "\n"))
 cat(paste0("  Förändring: ", ifelse(forandring >= 0, "+", ""), 
            format(forandring, big.mark = " "), 
            " (", sprintf("%+.1f", procent), "%)\n\n"))
 
+
+komponentavstamningsar <- as.character(as.numeric(PROGNOS_START) +5)
 # Visa utvalda mellanår
 cat("Utveckling över tid:\n")
 print(sammanfattning %>% 
-        filter(År %in% c("2025", "2030", "2035", "2040")) %>%
+        filter(År %in% komponentavstamningsar) %>%
         mutate(across(c(Total_befolkning, Kvinnor, Män), 
                       ~format(., big.mark = " "))))
 
