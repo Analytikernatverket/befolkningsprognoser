@@ -20,6 +20,7 @@
 library(shiny)
 library(bslib)
 library(ggplot2)
+library(ggiraph)
 library(dplyr)
 library(plotly)
 library(viridis)
@@ -1269,9 +1270,9 @@ skapa_komponent_data <- function(prognos, kommun_namn, komponent_typ, kommun_lis
 # Funktion för att skapa plot över tid
 skapa_komponent_plot <- function(data, titel) {
   if (is.null(data) || nrow(data) == 0) {
-    return(ggplot() + 
+    return(girafe(ggobj = ggplot() + 
              labs(title = titel, subtitle = "Ingen data tillgänglig") +
-             theme_minimal())
+             theme_minimal()))
   }
   
   # Hitta brytpunkt mellan historisk och prognosdata
@@ -1280,7 +1281,7 @@ skapa_komponent_plot <- function(data, titel) {
   
   p <- ggplot(data, aes(x = År, y = Värde, color = Dataserie, group = Dataserie)) +
     geom_line(linewidth = 1) +
-    geom_point(size = 2) +
+    geom_point_interactive(aes(tooltip = paste0("År: ", År, "\nVärde: ", Värde)), size = 2) +
     scale_color_manual(values = c("Historisk" = "black", "Prognos" = "blue")) +
     labs(title = titel,
          x = "År",
@@ -1289,7 +1290,8 @@ skapa_komponent_plot <- function(data, titel) {
     theme_minimal() +
     theme(
       legend.position = "bottom",
-      plot.title = element_text(size = 12, face = "bold")
+      plot.title = element_text(size = 10),
+      axis.title = element_text(size = 9)
     )
   
   # Lägg till brytlinje
@@ -1297,7 +1299,14 @@ skapa_komponent_plot <- function(data, titel) {
     p <- p + geom_vline(xintercept = brytpunkt, linetype = "dashed", color = "darkgray", alpha = 0.7)
   }
   
-  return(p)
+  
+  return(girafe(ggobj = p,
+                width_svg = if(str_detect(titel, "Total")) 7.9 else 5.0,
+                height_svg = 3.5,
+                options = list(
+                  opts_toolbar(saveaspng = FALSE),
+                  opts_sizing(rescale = FALSE)
+                  )))
 }
 
 # Hjälpfunktioner för Analysresultat-fliken
@@ -1797,20 +1806,33 @@ ui <- page_navbar(
       
       # Huvudinnehåll med kort i rutnät
       div(
+        # Rad 4: Total befolkning
+        fluidRow(
+          class = "mb-3",
+          column(6, card(
+            card_header("Total befolkning"),
+            card_body(girafeOutput("plot_total_befolkning", height = "300px"))
+          )),
+          column(6, card(
+            card_header("Total befolkningsförändring"),
+            card_body(girafeOutput("plot_total_forandring", height = "300px"))
+          ))
+        ),
+        
         # Rad 1: Födelse-komponenter
         fluidRow(
           class = "mb-3",
           column(4, card(
             card_header("Födda"),
-            card_body(plotOutput("plot_fodda", height = "300px"))
+            card_body(girafeOutput("plot_fodda"))
           )),
           column(4, card(
             card_header("Döda"), 
-            card_body(plotOutput("plot_doda", height = "300px"))
+            card_body(girafeOutput("plot_doda"))
           )),
           column(4, card(
             card_header("Födelsenetto"),
-            card_body(plotOutput("plot_fodelsenetto", height = "300px"))
+            card_body(girafeOutput("plot_fodelsenetto"))
           ))
         ),
         
@@ -1819,15 +1841,15 @@ ui <- page_navbar(
           class = "mb-3",
           column(4, card(
             card_header("Inrikes inflyttade"),
-            card_body(plotOutput("plot_inrikes_inflyttade", height = "300px"))
+            card_body(girafeOutput("plot_inrikes_inflyttade", width = "90%", height = "100%"))
           )),
           column(4, card(
             card_header("Inrikes utflyttade"),
-            card_body(plotOutput("plot_inrikes_utflyttade", height = "300px"))
+            card_body(girafeOutput("plot_inrikes_utflyttade", width = "90%", height = "100%"))
           )),
           column(4, card(
             card_header("Inrikes flyttnetto"),
-            card_body(plotOutput("plot_inrikes_netto", height = "300px"))
+            card_body(girafeOutput("plot_inrikes_netto", width = "90%", height = "100%"))
           ))
         ),
         
@@ -1836,30 +1858,18 @@ ui <- page_navbar(
           class = "mb-3",
           column(4, card(
             card_header("Invandrade"),
-            card_body(plotOutput("plot_invandrade", height = "300px"))
+            card_body(girafeOutput("plot_invandrade", height = "300px"))
           )),
           column(4, card(
             card_header("Utvandrade"),
-            card_body(plotOutput("plot_utvandrade", height = "300px"))
+            card_body(girafeOutput("plot_utvandrade", height = "300px"))
           )),
           column(4, card(
             card_header("Utrikes flyttnetto"),
-            card_body(plotOutput("plot_utrikes_netto", height = "300px"))
-          ))
-        ),
-        
-        # Rad 4: Total befolkning
-        fluidRow(
-          class = "mb-3",
-          column(6, card(
-            card_header("Total befolkning"),
-            card_body(plotOutput("plot_total_befolkning", height = "300px"))
-          )),
-          column(6, card(
-            card_header("Total befolkningsförändring"),
-            card_body(plotOutput("plot_total_forandring", height = "300px"))
+            card_body(girafeOutput("plot_utrikes_netto", height = "300px"))
           ))
         )
+        
       )
     )
   ),
@@ -2721,47 +2731,47 @@ server <- function(input, output, session) {
   })
   
   # Komponent-plottar
-  output$plot_fodda <- renderPlot({
+  output$plot_fodda <- renderGirafe({
     skapa_komponent_plot(data_fodda(), "Födda")
   })
   
-  output$plot_doda <- renderPlot({
+  output$plot_doda <- renderGirafe({
     skapa_komponent_plot(data_doda(), "Döda")
   })
   
-  output$plot_fodelsenetto <- renderPlot({
+  output$plot_fodelsenetto <- renderGirafe({
     skapa_komponent_plot(data_fodelsenetto(), "Födelsenetto")
   })
   
-  output$plot_inrikes_inflyttade <- renderPlot({
+  output$plot_inrikes_inflyttade <- renderGirafe({
     skapa_komponent_plot(data_inrikes_inflyttade(), "Inrikes inflyttade")
   })
   
-  output$plot_inrikes_utflyttade <- renderPlot({
+  output$plot_inrikes_utflyttade <- renderGirafe({
     skapa_komponent_plot(data_inrikes_utflyttade(), "Inrikes utflyttade")
   })
   
-  output$plot_inrikes_netto <- renderPlot({
+  output$plot_inrikes_netto <- renderGirafe({
     skapa_komponent_plot(data_inrikes_netto(), "Inrikes flyttnetto")
   })
   
-  output$plot_invandrade <- renderPlot({
+  output$plot_invandrade <- renderGirafe({
     skapa_komponent_plot(data_invandrade(), "Invandrade")
   })
   
-  output$plot_utvandrade <- renderPlot({
+  output$plot_utvandrade <- renderGirafe({
     skapa_komponent_plot(data_utvandrade(), "Utvandrade")
   })
   
-  output$plot_utrikes_netto <- renderPlot({
+  output$plot_utrikes_netto <- renderGirafe({
     skapa_komponent_plot(data_utrikes_netto(), "Utrikes flyttnetto")
   })
   
-  output$plot_total_befolkning <- renderPlot({
+  output$plot_total_befolkning <- renderGirafe({
     skapa_komponent_plot(data_total_befolkning(), "Total befolkning")
   })
   
-  output$plot_total_forandring <- renderPlot({
+  output$plot_total_forandring <- renderGirafe({
     skapa_komponent_plot(data_total_forandring(), "Total befolkningsförändring")
   })
 }

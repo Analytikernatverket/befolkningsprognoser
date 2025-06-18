@@ -130,7 +130,7 @@ track_message("Startar validering av inställningar...")
 # Kontrollera nödvändiga paket
 track_message("Kontrollerar installerade paket...")
 required_packages <- c("tidyverse", "pxweb", "writexl", "readxl", "zoo", 
-                       "openxlsx", "shiny", "bslib", "ggplot2", "plotly", "viridis")
+                       "openxlsx", "shiny", "bslib", "ggplot2", "plotly", "viridis", "ggiraph")
 
 missing_packages <- required_packages[!required_packages %in% installed.packages()[,"Package"]]
 if(length(missing_packages) > 0) {
