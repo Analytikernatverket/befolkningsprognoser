@@ -22,6 +22,7 @@ library(bslib)
 library(ggplot2)
 library(ggiraph)
 library(dplyr)
+library(stringr)
 library(plotly)
 library(viridis)
 

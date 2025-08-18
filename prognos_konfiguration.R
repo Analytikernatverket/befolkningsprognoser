@@ -42,7 +42,19 @@ PROJEKT_BESKRIVNING <- "Regional befolkningsprognos för Hallands län"
 # └─────────────────────────────────────────────────────────
 
 PROGNOSTYP <- "regional"  
+AVRUNDNING <- "heltal"                            # finns "heltal", "stokastisk" och "ingen". Heltal så avrundas riskerna, stokastisk så avrundas 0,4 till 0 i 60 % av fallen och 1 i 40 % av fallen. Vid ingen avrundning får man decimaler (som i SCB:s prognoser) 
+bevara_summa_auto_spline_utvandring = FALSE       # Om TRUE så bevaras summan av utvandringen i prognosen, FALSE beräknas riskerna per ålder/kön men slutsumman kan diffa mot summan för hela gruppen (vilket kan ställa till det för små kommuner)
+bevara_niva_per_ar_inflyttning = FALSE            # Om TRUE så bevaras summan av inflyttningen i prognosen, FALSE beräknas riskerna per ålder/kön men slutsumman kan diffa mot summan för hela gruppen (vilket kan ställa till det för små kommuner)
+metod_avstamning_regional <- "proportional"       # finns "minsta_kvadrat", "proportional", "raking" och "antal_baserad_proportionell"
+                                                                  # "antal_baserad_proportionell" är den jag tycker funkat bäst även för små kommuner där man slipper att prognoskurvor ligger "frikopplat" från historiska trenden, dvs. att den tex. är lägre eller högre än alla historiska år (detta händer främst i små kommuner)
 
+# rimligaste inställningar för dessa parametrar (särskilt för små kommuner i regionala prognoser):
+# AVRUNDNING <- "ingen"
+# bevara_summa_auto_spline_utvandring <- TRUE 
+# bevara_niva_per_ar_inflyttning <- TRUE
+# metod_avstamning_regional <- "antal_baserad_proportionell"
+#
+# tycker Peter Möller, Region Dalarna (nu är de inställda som de var i orginialversionen)
 
 # ┌─────────────────────────────────────────────────────────
 # │ För ENSKILD prognos - specificera geografi
@@ -97,6 +109,7 @@ PROGNOS_SLUT <- "2040"
 # └─────────────────────────────────────────────────────────
 
 SCENARIO <- "standard"
+
 
 # ┌─────────────────────────────────────────────────────────
 # │ ALTERNATIVSCENARIO - Justeringar av demografiska trender

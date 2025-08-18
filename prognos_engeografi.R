@@ -17,6 +17,9 @@
 
 library(tidyverse)
 
+set.seed(2025) # För reproducerbarhet så håller vi rbinom() konsekvent, dvs. utfallet blir slumpmässigt men samma vid varje körning
+
+
 # ===========================================================
 # LÄSA IN DATA
 # ===========================================================
@@ -180,29 +183,79 @@ berakna_doda <- function(befolkning, dodsrisker_data) {
     stop(paste("Inga dödsrisker finns för år", prognos_ar, "och region", unique(befolkning$Region)))
   }
   
-  # Beräkna antal döda
-  doda <- befolkning %>%
-    left_join(
-      dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      # För höga åldrar, använd risk för 100-åringar
-      Dodsrisk = case_when(
-        is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
-          filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
-          pull(Värde) %>% 
-          first(),
-        TRUE ~ Dodsrisk
-      ),
-      Antal_doda = round(Värde * Dodsrisk, 0)
-    ) %>%
-    mutate(
-      Värde = Antal_doda,
-      Variabel = "Döda"
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
+  # Beräkna antal döda - det finns tre olika metoder: "stokastisk", "heltal", "ingen".
+  if (AVRUNDNING == "stokastisk") {
+    doda <- befolkning %>%
+      left_join(
+        dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Dodsrisk = case_when(
+          is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>%
+            dplyr::pull(Värde) %>% first(),
+          TRUE ~ Dodsrisk
+        ),
+        Antal_doda_raw = map2_dbl(Värde, Dodsrisk, ~ {
+          if (is.na(.x) || is.na(.y) || .x < 0 || .y < 0 || .y > 1) {
+            NA_real_
+          } else {
+            tryCatch(rbinom(1, size = .x, prob = .y), warning = function(w) NA_real_, error = function(e) NA_real_)
+          }
+        }),
+        Antal_doda = replace_na(Antal_doda_raw, 0),
+        Värde = Antal_doda,
+        Variabel = "Döda"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  } else if (AVRUNDNING == "heltal") {
+   
+    doda <- befolkning %>%
+      left_join(
+        dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För höga åldrar, använd risk för 100-åringar
+        Dodsrisk = case_when(
+          is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Dodsrisk
+        ),
+        Antal_doda = round(Värde * Dodsrisk, 0)
+      ) %>%
+      mutate(
+        Värde = Antal_doda,
+        Variabel = "Döda"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  } else if (AVRUNDNING == "ingen") {
+    
+    doda <- befolkning %>%
+      left_join(
+        dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För höga åldrar, använd risk för 100-åringar
+        Dodsrisk = case_when(
+          is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Dodsrisk
+        ),
+        Antal_doda = Värde * Dodsrisk
+      ) %>%
+      mutate(
+        Värde = Antal_doda,
+        Variabel = "Döda"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   return(doda)
 }
 
@@ -220,23 +273,67 @@ berakna_inrikes_inflyttningar <- function(inflyttningsrisker_data, riksbefolknin
     stop(paste("Inga inflyttningsrisker finns för år", prognos_ar, "och region", geografi))
   }
   
-  # Beräkna inflyttning baserat på riksbefolkning
-  inflyttningar <- riksbef_ar %>%
-    select(Kön, Ålder, Riksbefolkning = Värde) %>%
-    crossing(Region = geografi) %>%
-    left_join(
-      inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
+  # Beräkna inflyttning baserat på riksbefolkning - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+    
+    inflyttningar <- riksbef_ar %>%
+      select(Kön, Ålder, Riksbefolkning = Värde) %>%
+      crossing(Region = geografi) %>%
+      left_join(
+        inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
     mutate(
-      Antal_inflyttningar = round(Riksbefolkning * Inflyttningsrisk, 0),
-      Antal_inflyttningar = replace_na(Antal_inflyttningar, 0),
+      Antal_inflyttningar_raw = map2_dbl(
+        Riksbefolkning, Inflyttningsrisk,
+        ~ if (!is.na(.x) && !is.na(.y) && .x >= 0 && .y >= 0 && .y <= 1) {
+          rbinom(1, size = .x, prob = .y)
+        } else {
+          NA_real_
+        }
+      ),
+      Antal_inflyttningar = replace_na(Antal_inflyttningar_raw, 0),
       År = prognos_ar,
       Värde = Antal_inflyttningar,
       Variabel = "Inrikes inflyttning"
     ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
+      select(-Antal_inflyttningar_raw)
+  } else if (AVRUNDNING == "heltal") {
+   
+    inflyttningar <- riksbef_ar %>%
+      select(Kön, Ålder, Riksbefolkning = Värde) %>%
+      crossing(Region = geografi) %>%
+      left_join(
+        inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_inflyttningar = round(Riksbefolkning * Inflyttningsrisk, 0),
+        Antal_inflyttningar = replace_na(Antal_inflyttningar, 0),
+        År = prognos_ar,
+        Värde = Antal_inflyttningar,
+        Variabel = "Inrikes inflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+     
+  } else if (AVRUNDNING == "ingen") {
+    
+    inflyttningar <- riksbef_ar %>%
+      select(Kön, Ålder, Riksbefolkning = Värde) %>%
+      crossing(Region = geografi) %>%
+      left_join(
+        inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_inflyttningar = Riksbefolkning * Inflyttningsrisk,
+        Antal_inflyttningar = replace_na(Antal_inflyttningar, 0),
+        År = prognos_ar,
+        Värde = Antal_inflyttningar,
+        Variabel = "Inrikes inflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   return(inflyttningar)
 }
 
@@ -252,28 +349,80 @@ berakna_inrikes_utflyttningar <- function(befolkning, utflyttningsrisker_data) {
     stop(paste("Inga utflyttningsrisker finns för år", prognos_ar, "och region", unique(befolkning$Region)))
   }
   
-  # Beräkna utflyttning baserat på egen befolkning
-  utflyttningar <- befolkning %>%
-    left_join(
-      utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      # För höga åldrar, använd risk för 100-åringar
-      Utflyttningsrisk = case_when(
-        is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
-          filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
-          pull(Värde) %>% 
-          first(),
-        TRUE ~ Utflyttningsrisk
-      ),
-      Utflyttningsrisk = replace_na(Utflyttningsrisk, 0),
-      Antal_utflyttningar = round(Värde * Utflyttningsrisk, 0),
-      Värde = Antal_utflyttningar,
-      Variabel = "Inrikes utflyttning"
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
+  # Beräkna utflyttning baserat på egen befolkning - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+    
+    utflyttningar <- befolkning %>%
+      left_join(
+        utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Utflyttningsrisk = case_when(
+          is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>%
+            dplyr::pull(Värde) %>% first(),
+          TRUE ~ Utflyttningsrisk
+        ),
+        Antal_utflyttningar_raw = map2_dbl(Värde, Utflyttningsrisk, ~ {
+          if (is.na(.x) || is.na(.y) || .x < 0 || .y < 0 || .y > 1) {
+            NA_real_
+          } else {
+            tryCatch(rbinom(1, size = .x, prob = .y), warning = function(w) NA_real_, error = function(e) NA_real_)
+          }
+        }),
+        Antal_utflyttningar = replace_na(Antal_utflyttningar_raw, 0),
+        Värde = Antal_utflyttningar,
+        Variabel = "Inrikes utflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "heltal") {
+    
+    utflyttningar <- befolkning %>%
+      left_join(
+        utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För höga åldrar, använd risk för 100-åringar
+        Utflyttningsrisk = case_when(
+          is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utflyttningsrisk
+        ),
+        Utflyttningsrisk = replace_na(Utflyttningsrisk, 0),
+        Antal_utflyttningar = round(Värde * Utflyttningsrisk, 0),
+        Värde = Antal_utflyttningar,
+        Variabel = "Inrikes utflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+   
+    utflyttningar <- befolkning %>%
+      left_join(
+        utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För höga åldrar, använd risk för 100-åringar
+        Utflyttningsrisk = case_when(
+          is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utflyttningsrisk
+        ),
+        Utflyttningsrisk = replace_na(Utflyttningsrisk, 0),
+        Antal_utflyttningar = Värde * Utflyttningsrisk,
+        Värde = Antal_utflyttningar,
+        Variabel = "Inrikes utflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   return(utflyttningar)
 }
 
@@ -291,23 +440,67 @@ berakna_invandring <- function(invandringsrisker_data, invandring_riket, prognos
     stop(paste("Inga invandringsrisker finns för år", prognos_ar, "och region", geografi))
   }
   
-  # Beräkna invandring som andel av rikets
-  invandring <- invandring_ar %>%
-    select(Kön, Ålder, Riksinvandring = Värde) %>%
-    crossing(Region = geografi) %>%
-    left_join(
-      invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
+  # Beräkna invandring som andel av rikets - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+      
+    invandring <- invandring_ar %>%
+      select(Kön, Ålder, Riksinvandring = Värde) %>%
+      crossing(Region = geografi) %>%
+      left_join(
+        invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
     mutate(
-      Antal_invandrare = round(Riksinvandring * Invandringsrisk, 0),
-      Antal_invandrare = replace_na(Antal_invandrare, 0),
+      Antal_invandrare_raw = map2_dbl(
+        Riksinvandring, Invandringsrisk,
+        ~ if (!is.na(.x) && !is.na(.y) && .x >= 0 && .y >= 0 && .y <= 1) {
+          rbinom(1, size = .x, prob = .y)
+        } else {
+          NA_real_
+        }
+      ),
+      Antal_invandrare = replace_na(Antal_invandrare_raw, 0),
       År = prognos_ar,
       Värde = Antal_invandrare,
       Variabel = "Invandring"
     ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
+      select(-Antal_invandrare_raw)
+  } else if (AVRUNDNING == "heltal") {
+    
+    invandring <- invandring_ar %>%
+      select(Kön, Ålder, Riksinvandring = Värde) %>%
+      crossing(Region = geografi) %>%
+      left_join(
+        invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_invandrare = round(Riksinvandring * Invandringsrisk, 0),
+        Antal_invandrare = replace_na(Antal_invandrare, 0),
+        År = prognos_ar,
+        Värde = Antal_invandrare,
+        Variabel = "Invandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    invandring <- invandring_ar %>%
+      select(Kön, Ålder, Riksinvandring = Värde) %>%
+      crossing(Region = geografi) %>%
+      left_join(
+        invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_invandrare = Riksinvandring * Invandringsrisk,
+        Antal_invandrare = replace_na(Antal_invandrare, 0),
+        År = prognos_ar,
+        Värde = Antal_invandrare,
+        Variabel = "Invandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   return(invandring)
 }
 
@@ -323,27 +516,80 @@ berakna_utvandring <- function(befolkning, utvandringsrisker_data) {
     stop(paste("Inga utvandringsrisker finns för år", prognos_ar, "och region", unique(befolkning$Region)))
   }
   
-  # Beräkna utvandring baserat på egen befolkning
-  utvandring <- befolkning %>%
-    left_join(
-      utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      # För höga åldrar, använd risk för 100-åringar
-      Utvandringsrisk = case_when(
-        is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
-          filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
-          pull(Värde) %>% 
-          first(),
-        TRUE ~ Utvandringsrisk
-      ),
-      Utvandringsrisk = replace_na(Utvandringsrisk, 0),
-      Antal_utvandrare = round(Värde * Utvandringsrisk, 0),
-      Värde = Antal_utvandrare,
-      Variabel = "Utvandring"
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
+  # Beräkna utvandring baserat på egen befolkning - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+  
+    utvandring <- befolkning %>%
+      left_join(
+        utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Utvandringsrisk = case_when(
+          is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>%
+            dplyr::pull(Värde) %>% first(),
+          TRUE ~ Utvandringsrisk
+        ),
+        Antal_utvandrare_raw = map2_dbl(Värde, Utvandringsrisk, ~ {
+          if (is.na(.x) || is.na(.y) || .x < 0 || .y < 0 || .y > 1) {
+            NA_real_
+          } else {
+            tryCatch(rbinom(1, size = .x, prob = .y), warning = function(w) NA_real_, error = function(e) NA_real_)
+          }
+        }),
+        Antal_utvandrare = replace_na(Antal_utvandrare_raw, 0),
+        Värde = Antal_utvandrare,
+        Variabel = "Utvandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  } else if (AVRUNDNING == "heltal") {
+    
+    utvandring <- befolkning %>%
+      left_join(
+        utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För höga åldrar, använd risk för 100-åringar
+        Utvandringsrisk = case_when(
+          is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utvandringsrisk
+        ),
+        Utvandringsrisk = replace_na(Utvandringsrisk, 0),
+        Antal_utvandrare = round(Värde * Utvandringsrisk, 0),
+        Värde = Antal_utvandrare,
+        Variabel = "Utvandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    utvandring <- befolkning %>%
+      left_join(
+        utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För höga åldrar, använd risk för 100-åringar
+        Utvandringsrisk = case_when(
+          is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utvandringsrisk
+        ),
+        Utvandringsrisk = replace_na(Utvandringsrisk, 0),
+        Antal_utvandrare = Värde * Utvandringsrisk,
+        Värde = Antal_utvandrare,
+        Variabel = "Utvandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  }
   
   return(utvandring)
 }
@@ -573,11 +819,11 @@ sammanfattning <- befolkningsprognos_single$sammanfattning
 
 start_bef <- sammanfattning %>%
   filter(År == PROGNOS_START) %>%
-  pull(Total_befolkning)
+  dplyr::pull(Total_befolkning)
 
 slut_bef <- sammanfattning %>%
   filter(År == PROGNOS_SLUT) %>%
-  pull(Total_befolkning)
+  dplyr::pull(Total_befolkning)
 
 forandring <- slut_bef - start_bef
 procent <- (forandring / start_bef) * 100

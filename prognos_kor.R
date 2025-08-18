@@ -33,7 +33,9 @@ track_message("=== STARTAR PROGNOSKÖRNING ===", "START")
 track_message("Rensar workspace...")
 rm(list = setdiff(ls(), c("PROJEKT_NAMN", "PROJEKT_BESKRIVNING", "PROJEKT_ANSVARIG",
                           "PROGNOSTYP", "ENSKILD_GEOGRAFI", "REGIONAL_INSTÄLLNINGAR",
-                          "HISTORISKA_ÅR", "PROGNOS_START", "PROGNOS_SLUT",
+                          "HISTORISKA_ÅR", "PROGNOS_START", "PROGNOS_SLUT", "AVRUNDNING", 
+                          "bevara_summa_auto_spline_utvandring", "bevara_summa_auto_spline_inflyttning_lansgrans", 
+                          "bevara_summa_auto_spline_inflyttning", "bevara_niva_per_ar_inflyttning", "metod_avstamning_regional",
                           "SCENARIO", "ALTERNATIV_JUSTERINGAR", "RISKBERÄKNINGS_PARAMETRAR",
                           "KÖR_DATAINHÄMTNING", "KÖR_RISKBERÄKNINGAR", "KÖR_PROGNOS",
                           "ÖPPNA_APP", "RENSA_GAMLA_RESULTAT", "VISA_DETALJERAD_OUTPUT",
@@ -379,6 +381,19 @@ if(KÖR_RISKBERÄKNINGAR) {
     }
     
     source("prognos_riskberakningar.R", local = FALSE)
+    if (!exists("bevara_summa_auto_spline_utvandring")) bevara_summa_auto_spline_utvandring <- FALSE
+    if (!exists("bevara_summa_auto_spline_inflyttning_lansgrans")) bevara_summa_auto_spline_inflyttning_lansgrans <- FALSE
+    if (!exists("bevara_summa_auto_spline_inflyttning")) bevara_summa_auto_spline_inflyttning <- TRUE
+    if (!exists("bevara_niva_per_ar_inflyttning")) bevara_niva_per_ar_inflyttning <- FALSE
+    cat(paste0("\nauto_spline_utvandring: ", bevara_summa_auto_spline_utvandring))
+    cat(paste0("\nauto_spline_inflyttning_lansgrans: ", bevara_summa_auto_spline_inflyttning_lansgrans))
+    cat(paste0("\nauto_spline_inflyttning: ", bevara_summa_auto_spline_inflyttning))
+    cat(paste0("\nbevara_niva_per_ar_inflyttning: ", bevara_niva_per_ar_inflyttning))
+    
+    kor_riskberakningar(bevara_summa_auto_spline_utvandring = bevara_summa_auto_spline_utvandring,
+                        bevara_summa_auto_spline_inflyttning_lansgrans = bevara_summa_auto_spline_inflyttning_lansgrans,
+                        bevara_summa_auto_spline_inflyttning = bevara_summa_auto_spline_inflyttning,
+                        bevara_niva_per_ar_inflyttning = bevara_niva_per_ar_inflyttning)
     track_message("✅ Riskberäkningar klara!")
     cat("\n✅ Riskberäkningar klara!\n")
     

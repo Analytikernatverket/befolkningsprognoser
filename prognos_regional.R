@@ -19,6 +19,8 @@
 
 library(tidyverse)
 
+set.seed(2025) # För reproducerbarhet så håller vi rbinom() konsekvent, dvs. utfallet blir slumpmässigt men samma vid varje körning
+
 # ===========================================================
 # LÄSA IN DATA
 # ===========================================================
@@ -197,29 +199,80 @@ berakna_doda <- function(befolkning, dodsrisker_data) {
     stop(paste("Inga dödsrisker finns för år", prognos_ar))
   }
   
-  # Beräkna antal döda
-  doda <- befolkning %>%
-    left_join(
-      dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      # För åldrar över 100, använd dödsrisken för 100-åringar
-      Dodsrisk = case_when(
-        is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
-          filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
-          pull(Värde) %>% 
-          first(),
-        TRUE ~ Dodsrisk
-      ),
-      Antal_doda = round(Värde * Dodsrisk, 0)
-    ) %>%
-    mutate(
-      Värde = Antal_doda,
-      Variabel = "Döda"
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
+  # Beräkna antal döda - det finns tre olika metoder: "stokastisk", "heltal", "ingen".
+  if (AVRUNDNING == "stokastisk") {
+    doda <- befolkning %>%
+      left_join(
+        dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Dodsrisk = case_when(
+          is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>%
+            dplyr::pull(Värde) %>% first(),
+          TRUE ~ Dodsrisk
+        ),
+        Antal_doda_raw = map2_dbl(Värde, Dodsrisk, ~ {
+          if (is.na(.x) || is.na(.y) || .x < 0 || .y < 0 || .y > 1) {
+            NA_real_
+          } else {
+            tryCatch(rbinom(1, size = .x, prob = .y), warning = function(w) NA_real_, error = function(e) NA_real_)
+          }
+        }),
+        Antal_doda = replace_na(Antal_doda_raw, 0),
+        Värde = Antal_doda,
+        Variabel = "Döda"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  } else if (AVRUNDNING == "heltal") {
+    
+    doda <- befolkning %>%
+      left_join(
+        dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För åldrar över 100, använd dödsrisken för 100-åringar
+        Dodsrisk = case_when(
+          is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Dodsrisk
+        ),
+        Antal_doda = round(Värde * Dodsrisk, 0)
+      ) %>%
+      mutate(
+        Värde = Antal_doda,
+        Variabel = "Döda"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    doda <- befolkning %>%
+      left_join(
+        dodsrisker_ar %>% select(Region, Kön, Ålder, Dodsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För åldrar över 100, använd dödsrisken för 100-åringar
+        Dodsrisk = case_when(
+          is.na(Dodsrisk) & Ålder > 100 ~ dodsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Dodsrisk
+        ),
+        Antal_doda = Värde * Dodsrisk
+      ) %>%
+      mutate(
+        Värde = Antal_doda,
+        Variabel = "Döda"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   return(doda)
 }
 
@@ -237,28 +290,84 @@ berakna_inrikes_inflyttningar <- function(inflyttningsrisker_data, riksbefolknin
     stop(paste("Inga inflyttningsrisker finns för år", prognos_ar))
   }
   
-  # Beräkna inflyttningar
-  inflyttningar <- expand_grid(
-    Region = unique(inflyttningsrisker_ar$Region),
-    Kön = unique(riksbef_ar$Kön),
-    Ålder = unique(riksbef_ar$Ålder)
-  ) %>%
-    left_join(
-      riksbef_ar %>% select(Kön, Ålder, Riksbefolkning = Värde),
-      by = c("Kön", "Ålder")
+  # Beräkna inflyttningar - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+    inflyttningar <- expand_grid(
+      Region = unique(inflyttningsrisker_ar$Region),
+      Kön = unique(riksbef_ar$Kön),
+      Ålder = unique(riksbef_ar$Ålder)
     ) %>%
-    left_join(
-      inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
+      left_join(
+        riksbef_ar %>% select(Kön, Ålder, Riksbefolkning = Värde),
+        by = c("Kön", "Ålder")
+      ) %>%
+      left_join(
+        inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_inflyttningar_raw = map2_dbl(
+          Riksbefolkning, Inflyttningsrisk,
+          ~ if (!is.na(.x) && !is.na(.y) && .x >= 0 && .y >= 0 && .y <= 1) {
+            rbinom(1, size = .x, prob = .y)
+          } else {
+            NA_real_
+          }
+        ),
+        Antal_inflyttningar = replace_na(Antal_inflyttningar_raw, 0),
+        År = prognos_ar,
+        Värde = Antal_inflyttningar,
+        Variabel = "Inrikes inflyttning"
+      ) %>%
+      select(-Antal_inflyttningar_raw)
+  } else if (AVRUNDNING == "heltal") {
+    
+    inflyttningar <- expand_grid(
+      Region = unique(inflyttningsrisker_ar$Region),
+      Kön = unique(riksbef_ar$Kön),
+      Ålder = unique(riksbef_ar$Ålder)
     ) %>%
-    mutate(
-      Antal_inflyttningar = round(Riksbefolkning * Inflyttningsrisk, 0),
-      Antal_inflyttningar = replace_na(Antal_inflyttningar, 0),
-      År = prognos_ar,
-      Värde = Antal_inflyttningar,
-      Variabel = "Inrikes inflyttning"
+      left_join(
+        riksbef_ar %>% select(Kön, Ålder, Riksbefolkning = Värde),
+        by = c("Kön", "Ålder")
+      ) %>%
+      left_join(
+        inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_inflyttningar = round(Riksbefolkning * Inflyttningsrisk, 0),
+        Antal_inflyttningar = replace_na(Antal_inflyttningar, 0),
+        År = prognos_ar,
+        Värde = Antal_inflyttningar,
+        Variabel = "Inrikes inflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    inflyttningar <- expand_grid(
+      Region = unique(inflyttningsrisker_ar$Region),
+      Kön = unique(riksbef_ar$Kön),
+      Ålder = unique(riksbef_ar$Ålder)
     ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
+      left_join(
+        riksbef_ar %>% select(Kön, Ålder, Riksbefolkning = Värde),
+        by = c("Kön", "Ålder")
+      ) %>%
+      left_join(
+        inflyttningsrisker_ar %>% select(Region, Kön, Ålder, Inflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_inflyttningar = Riksbefolkning * Inflyttningsrisk,
+        Antal_inflyttningar = replace_na(Antal_inflyttningar, 0),
+        År = prognos_ar,
+        Värde = Antal_inflyttningar,
+        Variabel = "Inrikes inflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   
   return(inflyttningar)
 }
@@ -275,27 +384,79 @@ berakna_inrikes_utflyttningar <- function(befolkning, utflyttningsrisker_data) {
     stop(paste("Inga utflyttningsrisker finns för år", prognos_ar))
   }
   
-  # Beräkna utflyttningar
-  utflyttningar <- befolkning %>%
-    left_join(
-      utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      # För åldrar över 100, använd risken för 100-åringar
-      Utflyttningsrisk = case_when(
-        is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
-          filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
-          pull(Värde) %>% 
-          first(),
-        TRUE ~ Utflyttningsrisk
-      ),
-      Utflyttningsrisk = replace_na(Utflyttningsrisk, 0),
-      Antal_utflyttningar = round(Värde * Utflyttningsrisk, 0),
-      Värde = Antal_utflyttningar,
-      Variabel = "Inrikes utflyttning"
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
+  # Beräkna utflyttningar - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+    utflyttningar <- befolkning %>%
+      left_join(
+        utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Utflyttningsrisk = case_when(
+          is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>%
+            dplyr::pull(Värde) %>% first(),
+          TRUE ~ Utflyttningsrisk
+        ),
+        Antal_utflyttningar_raw = map2_dbl(Värde, Utflyttningsrisk, ~ {
+          if (is.na(.x) || is.na(.y) || .x < 0 || .y < 0 || .y > 1) {
+            NA_real_
+          } else {
+            tryCatch(rbinom(1, size = .x, prob = .y), warning = function(w) NA_real_, error = function(e) NA_real_)
+          }
+        }),
+        Antal_utflyttningar = replace_na(Antal_utflyttningar_raw, 0),
+        Värde = Antal_utflyttningar,
+        Variabel = "Inrikes utflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  } else if (AVRUNDNING == "heltal") {
+    
+    utflyttningar <- befolkning %>%
+      left_join(
+        utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För åldrar över 100, använd risken för 100-åringar
+        Utflyttningsrisk = case_when(
+          is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utflyttningsrisk
+        ),
+        Utflyttningsrisk = replace_na(Utflyttningsrisk, 0),
+        Antal_utflyttningar = round(Värde * Utflyttningsrisk, 0),
+        Värde = Antal_utflyttningar,
+        Variabel = "Inrikes utflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    utflyttningar <- befolkning %>%
+      left_join(
+        utflyttningsrisker_ar %>% select(Region, Kön, Ålder, Utflyttningsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För åldrar över 100, använd risken för 100-åringar
+        Utflyttningsrisk = case_when(
+          is.na(Utflyttningsrisk) & Ålder > 100 ~ utflyttningsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utflyttningsrisk
+        ),
+        Utflyttningsrisk = replace_na(Utflyttningsrisk, 0),
+        Antal_utflyttningar = Värde * Utflyttningsrisk,
+        Värde = Antal_utflyttningar,
+        Variabel = "Inrikes utflyttning"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  }
   
   return(utflyttningar)
 }
@@ -314,28 +475,86 @@ berakna_invandring <- function(invandringsrisker_data, invandring_riket, prognos
     stop(paste("Inga invandringsrisker finns för år", prognos_ar))
   }
   
-  # Beräkna invandring per kommun
-  invandring <- expand_grid(
-    Region = unique(invandringsrisker_ar$Region),
-    Kön = unique(invandring_ar$Kön),
-    Ålder = unique(invandring_ar$Ålder)
-  ) %>%
-    left_join(
-      invandring_ar %>% select(Kön, Ålder, Riksinvandring = Värde),
-      by = c("Kön", "Ålder")
+  # Beräkna invandring per kommun - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+      
+    invandring <- expand_grid(
+      Region = unique(invandringsrisker_ar$Region),
+      Kön = unique(invandring_ar$Kön),
+      Ålder = unique(invandring_ar$Ålder)
     ) %>%
-    left_join(
-      invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
+      left_join(
+        invandring_ar %>% select(Kön, Ålder, Riksinvandring = Värde),
+        by = c("Kön", "Ålder")
+      ) %>%
+      left_join(
+        invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
     mutate(
-      Antal_invandrare = round(Riksinvandring * Invandringsrisk, 0),
-      Antal_invandrare = replace_na(Antal_invandrare, 0),
+      Antal_invandrare_raw = map2_dbl(
+        Riksinvandring, Invandringsrisk,
+        ~ if (!is.na(.x) && !is.na(.y) && .x >= 0 && .y >= 0 && .y <= 1) {
+          rbinom(1, size = .x, prob = .y)
+        } else {
+          NA_real_
+        }
+      ),
+      Antal_invandrare = replace_na(Antal_invandrare_raw, 0),
       År = prognos_ar,
       Värde = Antal_invandrare,
       Variabel = "Invandring"
     ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
+      select(-Antal_invandrare_raw)
+  } else if (AVRUNDNING == "heltal") {
+   
+    invandring <- expand_grid(
+      Region = unique(invandringsrisker_ar$Region),
+      Kön = unique(invandring_ar$Kön),
+      Ålder = unique(invandring_ar$Ålder)
+    ) %>%
+      left_join(
+        invandring_ar %>% select(Kön, Ålder, Riksinvandring = Värde),
+        by = c("Kön", "Ålder")
+      ) %>%
+      left_join(
+        invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_invandrare = round(Riksinvandring * Invandringsrisk, 0),
+        Antal_invandrare = replace_na(Antal_invandrare, 0),
+        År = prognos_ar,
+        Värde = Antal_invandrare,
+        Variabel = "Invandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+     
+  } else if (AVRUNDNING == "ingen") {
+    
+    invandring <- expand_grid(
+      Region = unique(invandringsrisker_ar$Region),
+      Kön = unique(invandring_ar$Kön),
+      Ålder = unique(invandring_ar$Ålder)
+    ) %>%
+      left_join(
+        invandring_ar %>% select(Kön, Ålder, Riksinvandring = Värde),
+        by = c("Kön", "Ålder")
+      ) %>%
+      left_join(
+        invandringsrisker_ar %>% select(Region, Kön, Ålder, Invandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Antal_invandrare = Riksinvandring * Invandringsrisk,
+        Antal_invandrare = replace_na(Antal_invandrare, 0),
+        År = prognos_ar,
+        Värde = Antal_invandrare,
+        Variabel = "Invandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  }
   
   return(invandring)
 }
@@ -352,28 +571,79 @@ berakna_utvandring <- function(befolkning, utvandringsrisker_data) {
     stop(paste("Inga utvandringsrisker finns för år", prognos_ar))
   }
   
-  # Beräkna utvandring
-  utvandring <- befolkning %>%
-    left_join(
-      utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      # För åldrar över 100, använd risken för 100-åringar
-      Utvandringsrisk = case_when(
-        is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
-          filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
-          pull(Värde) %>% 
-          first(),
-        TRUE ~ Utvandringsrisk
-      ),
-      Utvandringsrisk = replace_na(Utvandringsrisk, 0),
-      Antal_utvandrare = round(Värde * Utvandringsrisk, 0),
-      Värde = Antal_utvandrare,
-      Variabel = "Utvandring"
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
+  # Beräkna utvandring - det finns tre olika metoder: "stokastisk", "heltal", "ingen"
+  if (AVRUNDNING == "stokastisk") {
+    
+    utvandring <- befolkning %>%
+      left_join(
+        utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Utvandringsrisk = case_when(
+          is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>%
+            dplyr::pull(Värde) %>% first(),
+          TRUE ~ Utvandringsrisk
+        ),
+        Antal_utvandrare_raw = map2_dbl(Värde, Utvandringsrisk, ~ {
+          if (is.na(.x) || is.na(.y) || .x < 0 || .y < 0 || .y > 1) {
+            NA_real_
+          } else {
+            tryCatch(rbinom(1, size = .x, prob = .y), warning = function(w) NA_real_, error = function(e) NA_real_)
+          }
+        }),
+        Antal_utvandrare = replace_na(Antal_utvandrare_raw, 0),
+        Värde = Antal_utvandrare,
+        Variabel = "Utvandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  } else if (AVRUNDNING == "heltal") {
+    
+    utvandring <- befolkning %>%
+      left_join(
+        utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För åldrar över 100, använd risken för 100-åringar
+        Utvandringsrisk = case_when(
+          is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utvandringsrisk
+        ),
+        Utvandringsrisk = replace_na(Utvandringsrisk, 0),
+        Antal_utvandrare = round(Värde * Utvandringsrisk, 0),
+        Värde = Antal_utvandrare,
+        Variabel = "Utvandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    utvandring <- befolkning %>%
+      left_join(
+        utvandringsrisker_ar %>% select(Region, Kön, Ålder, Utvandringsrisk = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        # För åldrar över 100, använd risken för 100-åringar
+        Utvandringsrisk = case_when(
+          is.na(Utvandringsrisk) & Ålder > 100 ~ utvandringsrisker_ar %>% 
+            filter(Region == .data$Region, Kön == .data$Kön, Ålder == 100) %>% 
+            dplyr::pull(Värde) %>% 
+            first(),
+          TRUE ~ Utvandringsrisk
+        ),
+        Utvandringsrisk = replace_na(Utvandringsrisk, 0),
+        Antal_utvandrare = Värde * Utvandringsrisk,
+        Värde = Antal_utvandrare,
+        Variabel = "Utvandring"
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+  }
   return(utvandring)
 }
 
@@ -382,254 +652,585 @@ berakna_utvandring <- function(befolkning, utvandringsrisker_data) {
 # ===========================================================
 
 avstam_flyttningar_lansgrans <- function(kommun_flyttningar, lansgransandelar, lan_flyttningar, 
-                                         lan_namn, kommuner, ar, flyttningstyp = "inflyttning") {
+                                        lan_namn, kommuner, ar, flyttningstyp = "inflyttning") {
   
-  # 1. Beräkna kommunernas flyttningar över länsgräns
-  kommun_lansgrans <- kommun_flyttningar %>%
-    filter(Region %in% kommuner) %>%
-    left_join(
-      lansgransandelar %>%
-        filter(År == ar) %>%
-        select(Region, Kön, Ålder, Andel_lansgrans = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(
-      Flyttningar_lansgrans = round(Värde * Andel_lansgrans, 0)
-    ) %>%
-    group_by(Kön, Ålder, År, Variabel) %>%
-    summarise(
-      Kommun_lansgrans_total = sum(Flyttningar_lansgrans, na.rm = TRUE),
-      .groups = "drop"
-    )
-  
-  # 2. Hämta länets flyttningar (endast över länsgräns)
-  lan_total <- lan_flyttningar %>%
-    filter(Region == lan_namn) %>%
-    select(Kön, Ålder, År, Variabel, Lan_total = Värde)
-  
-  # 3. Beräkna justeringsfaktor
-  justering <- lan_total %>%
-    left_join(kommun_lansgrans, by = c("Kön", "Ålder", "År", "Variabel")) %>%
-    mutate(
-      Kommun_lansgrans_total = replace_na(Kommun_lansgrans_total, 0),
-      Justeringsfaktor = case_when(
-        Kommun_lansgrans_total > 0 ~ Lan_total / Kommun_lansgrans_total,
-        Lan_total > 0 & Kommun_lansgrans_total == 0 ~ NA_real_,
-        TRUE ~ 1
+  if (AVRUNDNING == "heltal") {
+    # 1. Beräkna kommunernas flyttningar över länsgräns
+    kommun_lansgrans <- kommun_flyttningar %>%
+      filter(Region %in% kommuner) %>%
+      left_join(
+        lansgransandelar %>%
+          filter(År == ar) %>%
+          select(Region, Kön, Ålder, Andel_lansgrans = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Flyttningar_lansgrans = round(Värde * Andel_lansgrans, 0)
+      ) %>%
+      group_by(Kön, Ålder, År, Variabel) %>%
+      summarise(
+        Kommun_lansgrans_total = sum(Flyttningar_lansgrans, na.rm = TRUE),
+        .groups = "drop"
       )
-    )
-  
-  # 4. Applicera justering på länsgränsdelen
-  kommun_justerad <- kommun_flyttningar %>%
-    filter(Region %in% kommuner) %>%
-    left_join(
-      lansgransandelar %>%
-        filter(År == ar) %>%
-        select(Region, Kön, Ålder, Andel_lansgrans = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    left_join(
-      justering %>% select(Kön, Ålder, År, Variabel, Justeringsfaktor, Lan_total),
-      by = c("Kön", "Ålder", "År", "Variabel")
-    ) %>%
-    mutate(
-      # Separera flyttningar inom och över länsgräns
-      Flyttningar_inom_lan = round(Värde * (1 - Andel_lansgrans), 0),
-      Flyttningar_lansgrans_original = round(Värde * Andel_lansgrans, 0),
-      
-      # Justera endast länsgränsdelen
-      Flyttningar_lansgrans_justerad = case_when(
-        !is.na(Justeringsfaktor) ~ round(Flyttningar_lansgrans_original * Justeringsfaktor, 0),
-        is.na(Justeringsfaktor) & !is.na(Lan_total) & Lan_total > 0 ~ 
-          round(Lan_total / n_distinct(Region[Region %in% kommuner]), 0),  # Fördela jämnt
-        TRUE ~ Flyttningar_lansgrans_original
-      ),
-      
-      # Ny total = inom län + justerad länsgräns
-      Värde = Flyttningar_inom_lan + Flyttningar_lansgrans_justerad
-    ) %>%
-    select(Region, Kön, Ålder, År, Värde, Variabel)
-  
-  # Hantera avrundningsfel
-  slutlig_kontroll <- kommun_justerad %>%
-    left_join(
-      lansgransandelar %>%
-        filter(År == ar) %>%
-        select(Region, Kön, Ålder, Andel_lansgrans = Värde),
-      by = c("Region", "Kön", "Ålder")
-    ) %>%
-    mutate(Flyttningar_lansgrans = round(Värde * Andel_lansgrans, 0)) %>%
-    group_by(Kön, Ålder, År, Variabel) %>%
-    summarise(Ny_kommun_lansgrans_total = sum(Flyttningar_lansgrans, na.rm = TRUE), .groups = "drop") %>%
-    left_join(lan_total, by = c("Kön", "Ålder", "År", "Variabel")) %>%
-    mutate(Slutlig_diff = Lan_total - Ny_kommun_lansgrans_total)
-  
-  # Justera största kommunen för avrundningsfel
-  if (any(abs(slutlig_kontroll$Slutlig_diff) > 0)) {
-    for (i in 1:nrow(slutlig_kontroll)) {
-      if (abs(slutlig_kontroll$Slutlig_diff[i]) > 0) {
-        # Hitta största kommunen
-        storsta_kommun <- kommun_justerad %>%
-          filter(
-            Kön == slutlig_kontroll$Kön[i],
-            Ålder == slutlig_kontroll$Ålder[i],
-            År == slutlig_kontroll$År[i],
-            Variabel == slutlig_kontroll$Variabel[i]
-          ) %>%
-          arrange(desc(Värde)) %>%
-          slice(1)
+    
+    # 2. Hämta länets flyttningar (endast över länsgräns)
+    lan_total <- lan_flyttningar %>%
+      filter(Region == lan_namn) %>%
+      select(Kön, Ålder, År, Variabel, Lan_total = Värde)
+    
+    # 3. Beräkna justeringsfaktor
+    justering <- lan_total %>%
+      left_join(kommun_lansgrans, by = c("Kön", "Ålder", "År", "Variabel")) %>%
+      mutate(
+        Kommun_lansgrans_total = replace_na(Kommun_lansgrans_total, 0),
+        Justeringsfaktor = case_when(
+          Kommun_lansgrans_total > 0 ~ Lan_total / Kommun_lansgrans_total,
+          Lan_total > 0 & Kommun_lansgrans_total == 0 ~ NA_real_,
+          TRUE ~ 1
+        )
+      )
+    
+    # 4. Applicera justering på länsgränsdelen
+    kommun_justerad <- kommun_flyttningar %>%
+      filter(Region %in% kommuner) %>%
+      left_join(
+        lansgransandelar %>%
+          filter(År == ar) %>%
+          select(Region, Kön, Ålder, Andel_lansgrans = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      left_join(
+        justering %>% select(Kön, Ålder, År, Variabel, Justeringsfaktor, Lan_total),
+        by = c("Kön", "Ålder", "År", "Variabel")
+      ) %>%
+      mutate(
+        # Separera flyttningar inom och över länsgräns
+        Flyttningar_inom_lan = round(Värde * (1 - Andel_lansgrans), 0),
+        Flyttningar_lansgrans_original = round(Värde * Andel_lansgrans, 0),
         
-        if (nrow(storsta_kommun) > 0) {
-          kommun_justerad <- kommun_justerad %>%
-            mutate(
-              Värde = case_when(
-                Region == storsta_kommun$Region[1] &
-                  Kön == storsta_kommun$Kön[1] &
-                  Ålder == storsta_kommun$Ålder[1] &
-                  År == storsta_kommun$År[1] &
-                  Variabel == storsta_kommun$Variabel[1] ~ 
-                  Värde + slutlig_kontroll$Slutlig_diff[i],
-                TRUE ~ Värde
+        # Justera endast länsgränsdelen
+        Flyttningar_lansgrans_justerad = case_when(
+          !is.na(Justeringsfaktor) ~ round(Flyttningar_lansgrans_original * Justeringsfaktor, 0),
+          is.na(Justeringsfaktor) & !is.na(Lan_total) & Lan_total > 0 ~ 
+            round(Lan_total / n_distinct(Region[Region %in% kommuner]), 0),  # Fördela jämnt
+          TRUE ~ Flyttningar_lansgrans_original
+        ),
+        
+        # Ny total = inom län + justerad länsgräns
+        Värde = Flyttningar_inom_lan + Flyttningar_lansgrans_justerad
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+    # Hantera avrundningsfel
+    slutlig_kontroll <- kommun_justerad %>%
+      left_join(
+        lansgransandelar %>%
+          filter(År == ar) %>%
+          select(Region, Kön, Ålder, Andel_lansgrans = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(Flyttningar_lansgrans = round(Värde * Andel_lansgrans, 0)) %>%
+      group_by(Kön, Ålder, År, Variabel) %>%
+      summarise(Ny_kommun_lansgrans_total = sum(Flyttningar_lansgrans, na.rm = TRUE), .groups = "drop") %>%
+      left_join(lan_total, by = c("Kön", "Ålder", "År", "Variabel")) %>%
+      mutate(Slutlig_diff = Lan_total - Ny_kommun_lansgrans_total)
+    
+    # Justera största kommunen för avrundningsfel
+    if (any(abs(slutlig_kontroll$Slutlig_diff) > 0)) {
+      for (i in 1:nrow(slutlig_kontroll)) {
+        if (abs(slutlig_kontroll$Slutlig_diff[i]) > 0) {
+          # Hitta största kommunen
+          storsta_kommun <- kommun_justerad %>%
+            filter(
+              Kön == slutlig_kontroll$Kön[i],
+              Ålder == slutlig_kontroll$Ålder[i],
+              År == slutlig_kontroll$År[i],
+              Variabel == slutlig_kontroll$Variabel[i]
+            ) %>%
+            arrange(desc(Värde)) %>%
+            slice(1)
+          
+          if (nrow(storsta_kommun) > 0) {
+            kommun_justerad <- kommun_justerad %>%
+              mutate(
+                Värde = case_when(
+                  Region == storsta_kommun$Region[1] &
+                    Kön == storsta_kommun$Kön[1] &
+                    Ålder == storsta_kommun$Ålder[1] &
+                    År == storsta_kommun$År[1] &
+                    Variabel == storsta_kommun$Variabel[1] ~ 
+                    Värde + slutlig_kontroll$Slutlig_diff[i],
+                  TRUE ~ Värde
+                )
               )
-            )
+          }
         }
       }
     }
+    
+    # Logga information om stora justeringar
+    stora_justeringar <- justering %>%
+      filter(abs(Justeringsfaktor - 1) > 0.1 | is.na(Justeringsfaktor)) %>%
+      nrow()
+    
+    if (stora_justeringar > 0) {
+      cat(paste0("  Avstämning ", flyttningstyp, " över länsgräns: ", 
+                 stora_justeringar, " celler med justering > 10%\n"))
+    }
+    
+    return(kommun_justerad)
+    
+  } else if (AVRUNDNING == "ingen") {
+    
+    # 1. Kommunernas flyttningar över länsgräns utan avrundning
+    kommun_lansgrans <- kommun_flyttningar %>%
+      filter(Region %in% kommuner) %>%
+      left_join(
+        lansgransandelar %>%
+          filter(År == ar) %>%
+          select(Region, Kön, Ålder, Andel_lansgrans = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      mutate(
+        Flyttningar_lansgrans = Värde * Andel_lansgrans
+      ) %>%
+      group_by(Kön, Ålder, År, Variabel) %>%
+      summarise(
+        Kommun_lansgrans_total = sum(Flyttningar_lansgrans, na.rm = TRUE),
+        .groups = "drop"
+      )
+    
+    # 2. Länets flyttningar
+    lan_total <- lan_flyttningar %>%
+      filter(Region == lan_namn) %>%
+      select(Kön, Ålder, År, Variabel, Lan_total = Värde)
+    
+    # 3. Justeringsfaktor
+    justering <- lan_total %>%
+      left_join(kommun_lansgrans, by = c("Kön", "Ålder", "År", "Variabel")) %>%
+      mutate(
+        Kommun_lansgrans_total = replace_na(Kommun_lansgrans_total, 0),
+        Justeringsfaktor = case_when(
+          Kommun_lansgrans_total > 0 ~ Lan_total / Kommun_lansgrans_total,
+          Lan_total > 0 & Kommun_lansgrans_total == 0 ~ NA_real_,
+          TRUE ~ 1
+        )
+      )
+    
+    # 4. Applicera justering utan avrundning
+    kommun_justerad <- kommun_flyttningar %>%
+      filter(Region %in% kommuner) %>%
+      left_join(
+        lansgransandelar %>%
+          filter(År == ar) %>%
+          select(Region, Kön, Ålder, Andel_lansgrans = Värde),
+        by = c("Region", "Kön", "Ålder")
+      ) %>%
+      left_join(
+        justering %>% select(Kön, Ålder, År, Variabel, Justeringsfaktor, Lan_total),
+        by = c("Kön", "Ålder", "År", "Variabel")
+      ) %>%
+      mutate(
+        Flyttningar_inom_lan = Värde * (1 - Andel_lansgrans),
+        Flyttningar_lansgrans_original = Värde * Andel_lansgrans,
+        Flyttningar_lansgrans_justerad = case_when(
+          !is.na(Justeringsfaktor) ~ Flyttningar_lansgrans_original * Justeringsfaktor,
+          is.na(Justeringsfaktor) & !is.na(Lan_total) & Lan_total > 0 ~ 
+            Lan_total / n_distinct(Region[Region %in% kommuner]),
+          TRUE ~ Flyttningar_lansgrans_original
+        ),
+        Värde = Flyttningar_inom_lan + Flyttningar_lansgrans_justerad
+      ) %>%
+      select(Region, Kön, Ålder, År, Värde, Variabel)
+    
+    # 5. Robust avrundning sist (balanced rounding, NA-säker)
+    kommun_final <- kommun_justerad %>%
+      dplyr::group_by(Kön, Ålder, År, Variabel) %>%
+      dplyr::group_modify(~{
+        x <- .x
+        # gör numeriskt och ersätt NA med 0
+        x$Värde <- as.numeric(x$Värde)
+        x$Värde[is.na(x$Värde)] <- 0
+        
+        # Largest Remainder-metoden med målsumma = round(sum(x))
+        base  <- floor(x$Värde)
+        resid <- x$Värde - base
+        target <- as.integer(round(sum(x$Värde, na.rm = TRUE)))
+        need   <- target - sum(base)
+        
+        if (!is.na(need) && need != 0 && nrow(x) > 0) {
+          k <- min(abs(need), nrow(x))
+          idx <- if (need > 0) order(resid, decreasing = TRUE) else order(resid, decreasing = FALSE)
+          idx <- idx[seq_len(k)]
+          base[idx] <- base[idx] + ifelse(need > 0, 1L, -1L)
+        }
+        
+        x$Värde <- base
+        x
+      }) %>%
+      dplyr::ungroup()
+    
+    return(kommun_final)
+    
   }
   
-  # Logga information om stora justeringar
-  stora_justeringar <- justering %>%
-    filter(abs(Justeringsfaktor - 1) > 0.1 | is.na(Justeringsfaktor)) %>%
-    nrow()
-  
-  if (stora_justeringar > 0) {
-    cat(paste0("  Avstämning ", flyttningstyp, " över länsgräns: ", 
-               stora_justeringar, " celler med justering > 10%\n"))
-  }
-  
-  return(kommun_justerad)
 }
 
 # ===========================================================
 # GENERELL AVSTÄMNINGSFUNKTION (för övriga komponenter)
 # ===========================================================
 
-avstam_komponent_mot_lan <- function(komponent_data, lan_namn, kommuner, komponent_namn = "") {
-  # Separera län- och kommundata
+# avstam_komponent_mot_lan <- function(komponent_data, lan_namn, kommuner, komponent_namn = "") {
+#   # Separera län- och kommundata
+#   lan_data <- komponent_data %>% filter(Region == lan_namn)
+#   kommun_data <- komponent_data %>% filter(Region %in% kommuner)
+#   
+#   # Om ingen länsdata finns, returnera kommundata
+#   if (nrow(lan_data) == 0) {
+#     return(kommun_data)
+#   }
+#   
+#   # Summera kommundata per kön/ålder
+#   kommun_summa <- kommun_data %>%
+#     group_by(Kön, Ålder, År, Variabel) %>%
+#     summarise(Kommun_total = sum(Värde, na.rm = TRUE), .groups = "drop")
+#   
+#   # Jämför med länsdata
+#   avstamning <- lan_data %>%
+#     select(Kön, Ålder, År, Variabel, Lan_total = Värde) %>%
+#     left_join(kommun_summa, by = c("Kön", "Ålder", "År", "Variabel")) %>%
+#     mutate(
+#       Kommun_total = replace_na(Kommun_total, 0),
+#       Differens = Lan_total - Kommun_total,
+#       Justeringsfaktor = case_when(
+#         Kommun_total > 0 ~ Lan_total / Kommun_total,
+#         Lan_total > 0 & Kommun_total == 0 ~ NA_real_,
+#         TRUE ~ 1
+#       )
+#     )
+#   
+#   # Logga stora avvikelser
+#   stora_avvikelser <- avstamning %>%
+#     filter(abs(Differens) > 5) %>%
+#     arrange(desc(abs(Differens)))
+#   
+#   if (nrow(stora_avvikelser) > 0 && komponent_namn != "") {
+#     cat(paste0("  Avstämning ", komponent_namn, ": Justerar ", 
+#                nrow(stora_avvikelser), " celler med differens > 5\n"))
+#   }
+#   
+#   # För celler där län har värde men kommuner saknar
+#   nya_rader <- avstamning %>%
+#     filter(is.na(Justeringsfaktor) & Lan_total > 0) %>%
+#     crossing(Region = kommuner) %>%
+#     mutate(
+#       Värde = round(Lan_total / length(kommuner), 0)
+#     ) %>%
+#     select(Region, Kön, Ålder, År, Variabel, Värde)
+#   
+#   # nytt tillägg till nya_rader
+#   nya_rader_justerade <- nya_rader %>%
+#     group_by(Kön, Ålder, År, Variabel) %>%
+#     mutate(
+#       diff = first(Värde * length(kommuner)) - sum(Värde),
+#       index_max = which.max(Värde),
+#       Värde = if_else(row_number() == index_max, Värde + diff, Värde)
+#     ) %>%
+#     ungroup()
+#   
+#   
+#   # Justera befintlig kommundata
+#   # kommun_justerad <- kommun_data %>%
+#   #   left_join(
+#   #     avstamning %>% select(Kön, Ålder, År, Variabel, Justeringsfaktor),
+#   #     by = c("Kön", "Ålder", "År", "Variabel")
+#   #   ) %>%
+#   #   mutate(
+#   #     Värde = case_when(
+#   #       !is.na(Justeringsfaktor) ~ round(Värde * Justeringsfaktor, 0),
+#   #       TRUE ~ Värde
+#   #     )
+#   #   ) %>%
+#   #   select(-Justeringsfaktor)
+#   
+#   kommun_justerad <- kommun_data %>%
+#     left_join(
+#       avstamning %>% select(Kön, Ålder, År, Variabel, Lan_total, Justeringsfaktor),
+#       by = c("Kön", "Ålder", "År", "Variabel")
+#     ) %>%
+#     mutate(
+#       Värde = case_when(
+#         !is.na(Justeringsfaktor) ~ round(Värde * Justeringsfaktor, 0),
+#         TRUE ~ Värde
+#       )
+#     ) %>%
+#     group_by(Kön, Ålder, År, Variabel) %>%
+#     mutate(
+#       diff = first(Lan_total) - sum(Värde),
+#       index_max = which.max(Värde),
+#       Värde = if_else(row_number() == index_max, Värde + diff, Värde)
+#     ) %>%
+#     ungroup() %>%
+#     select(-Justeringsfaktor, -Lan_total, -diff, -index_max)
+#   
+#   
+#   # Kombinera med nya rader
+#   befintliga_kombinationer <- kommun_justerad %>%
+#     select(Region, Kön, Ålder, År, Variabel) %>%
+#     distinct()
+#   
+#   # nya_rader_unika <- nya_rader %>%
+#   #   anti_join(befintliga_kombinationer, by = c("Region", "Kön", "Ålder", "År", "Variabel"))
+#   nya_rader_unika <- nya_rader_justerade %>%
+#     anti_join(befintliga_kombinationer, by = c("Region", "Kön", "Ålder", "År", "Variabel"))
+#   
+#   
+#   kommun_final <- bind_rows(kommun_justerad, nya_rader_unika)
+#   
+#   # Hantera avrundningsfel
+#   slutlig_kontroll <- kommun_final %>%
+#     group_by(Kön, Ålder, År, Variabel) %>%
+#     summarise(Ny_kommun_total = sum(Värde, na.rm = TRUE), .groups = "drop") %>%
+#     left_join(
+#       lan_data %>% select(Kön, Ålder, År, Variabel, Lan_total = Värde),
+#       by = c("Kön", "Ålder", "År", "Variabel")
+#     ) %>%
+#     mutate(Slutlig_diff = Lan_total - Ny_kommun_total)
+#   
+#   # Justera största kommunen för avrundningsfel
+#   if (any(abs(slutlig_kontroll$Slutlig_diff) > 0)) {
+#     for (i in 1:nrow(slutlig_kontroll)) {
+#       if (abs(slutlig_kontroll$Slutlig_diff[i]) > 0) {
+#         storsta_kommun <- kommun_final %>%
+#           filter(
+#             Kön == slutlig_kontroll$Kön[i],
+#             Ålder == slutlig_kontroll$Ålder[i],
+#             År == slutlig_kontroll$År[i],
+#             Variabel == slutlig_kontroll$Variabel[i]
+#           ) %>%
+#           arrange(desc(Värde)) %>%
+#           slice(1)
+#         
+#         if (nrow(storsta_kommun) > 0) {
+#           kommun_final <- kommun_final %>%
+#             mutate(
+#               Värde = case_when(
+#                 Region == storsta_kommun$Region[1] &
+#                   Kön == storsta_kommun$Kön[1] &
+#                   Ålder == storsta_kommun$Ålder[1] &
+#                   År == storsta_kommun$År[1] &
+#                   Variabel == storsta_kommun$Variabel[1] ~ 
+#                   Värde + slutlig_kontroll$Slutlig_diff[i],
+#                 TRUE ~ Värde
+#               )
+#             )
+#         }
+#       }
+#     }
+#   }
+#   
+#   return(kommun_final)
+# }
+
+avstam_komponent_mot_lan <- function(komponent_data, lan_namn, kommuner, komponent_namn = "",
+                                     metod = "minsta_kvadrat",                # raking, proportional, minsta_kvadrat eller antal_baserad_proportionell
+                                     max_iter = 50, tol = 1e-6        # inställningar för raking-metoden
+) {
   lan_data <- komponent_data %>% filter(Region == lan_namn)
   kommun_data <- komponent_data %>% filter(Region %in% kommuner)
   
-  # Om ingen länsdata finns, returnera kommundata
-  if (nrow(lan_data) == 0) {
-    return(kommun_data)
-  }
+  if (nrow(lan_data) == 0) return(kommun_data)
   
-  # Summera kommundata per kön/ålder
-  kommun_summa <- kommun_data %>%
+  kommun_mat <- kommun_data %>%
+    mutate(id = paste(Region, Kön, Ålder, sep = "_")) %>%
+    select(id, Region, Kön, Ålder, År, Variabel, Värde)
+  
+  lan_mal <- lan_data %>%
     group_by(Kön, Ålder, År, Variabel) %>%
-    summarise(Kommun_total = sum(Värde, na.rm = TRUE), .groups = "drop")
+    summarise(Lan_total = sum(Värde), .groups = "drop")
   
-  # Jämför med länsdata
-  avstamning <- lan_data %>%
-    select(Kön, Ålder, År, Variabel, Lan_total = Värde) %>%
+  kommun_summa <- kommun_mat %>%
+    group_by(Kön, Ålder, År, Variabel) %>%
+    summarise(Kommun_total = sum(Värde), .groups = "drop")
+  
+  justeringstabell <- lan_mal %>%
     left_join(kommun_summa, by = c("Kön", "Ålder", "År", "Variabel")) %>%
-    mutate(
-      Kommun_total = replace_na(Kommun_total, 0),
-      Differens = Lan_total - Kommun_total,
-      Justeringsfaktor = case_when(
-        Kommun_total > 0 ~ Lan_total / Kommun_total,
-        Lan_total > 0 & Kommun_total == 0 ~ NA_real_,
-        TRUE ~ 1
-      )
-    )
+    mutate(Justeringsfaktor = if_else(Kommun_total > 0, Lan_total / Kommun_total, NA_real_))
   
-  # Logga stora avvikelser
-  stora_avvikelser <- avstamning %>%
-    filter(abs(Differens) > 5) %>%
-    arrange(desc(abs(Differens)))
-  
-  if (nrow(stora_avvikelser) > 0 && komponent_namn != "") {
-    cat(paste0("  Avstämning ", komponent_namn, ": Justerar ", 
-               nrow(stora_avvikelser), " celler med differens > 5\n"))
-  }
-  
-  # För celler där län har värde men kommuner saknar
-  nya_rader <- avstamning %>%
-    filter(is.na(Justeringsfaktor) & Lan_total > 0) %>%
+  nya_rader <- justeringstabell %>%
+    filter(is.na(Kommun_total) & Lan_total > 0) %>%
     crossing(Region = kommuner) %>%
-    mutate(
-      Värde = round(Lan_total / length(kommuner), 0)
-    ) %>%
+    mutate(Värde = round(Lan_total / length(kommuner), 0)) %>%
     select(Region, Kön, Ålder, År, Variabel, Värde)
   
-  # Justera befintlig kommundata
-  kommun_justerad <- kommun_data %>%
-    left_join(
-      avstamning %>% select(Kön, Ålder, År, Variabel, Justeringsfaktor),
-      by = c("Kön", "Ålder", "År", "Variabel")
-    ) %>%
-    mutate(
-      Värde = case_when(
-        !is.na(Justeringsfaktor) ~ round(Värde * Justeringsfaktor, 0),
-        TRUE ~ Värde
-      )
-    ) %>%
-    select(-Justeringsfaktor)
-  
-  # Kombinera med nya rader
-  befintliga_kombinationer <- kommun_justerad %>%
-    select(Region, Kön, Ålder, År, Variabel) %>%
-    distinct()
-  
-  nya_rader_unika <- nya_rader %>%
-    anti_join(befintliga_kombinationer, by = c("Region", "Kön", "Ålder", "År", "Variabel"))
-  
-  kommun_final <- bind_rows(kommun_justerad, nya_rader_unika)
-  
-  # Hantera avrundningsfel
-  slutlig_kontroll <- kommun_final %>%
-    group_by(Kön, Ålder, År, Variabel) %>%
-    summarise(Ny_kommun_total = sum(Värde, na.rm = TRUE), .groups = "drop") %>%
-    left_join(
-      lan_data %>% select(Kön, Ålder, År, Variabel, Lan_total = Värde),
-      by = c("Kön", "Ålder", "År", "Variabel")
-    ) %>%
-    mutate(Slutlig_diff = Lan_total - Ny_kommun_total)
-  
-  # Justera största kommunen för avrundningsfel
-  if (any(abs(slutlig_kontroll$Slutlig_diff) > 0)) {
-    for (i in 1:nrow(slutlig_kontroll)) {
-      if (abs(slutlig_kontroll$Slutlig_diff[i]) > 0) {
-        storsta_kommun <- kommun_final %>%
-          filter(
-            Kön == slutlig_kontroll$Kön[i],
-            Ålder == slutlig_kontroll$Ålder[i],
-            År == slutlig_kontroll$År[i],
-            Variabel == slutlig_kontroll$Variabel[i]
-          ) %>%
-          arrange(desc(Värde)) %>%
-          slice(1)
-        
-        if (nrow(storsta_kommun) > 0) {
-          kommun_final <- kommun_final %>%
-            mutate(
-              Värde = case_when(
-                Region == storsta_kommun$Region[1] &
-                  Kön == storsta_kommun$Kön[1] &
-                  Ålder == storsta_kommun$Ålder[1] &
-                  År == storsta_kommun$År[1] &
-                  Variabel == storsta_kommun$Variabel[1] ~ 
-                  Värde + slutlig_kontroll$Slutlig_diff[i],
-                TRUE ~ Värde
-              )
-            )
-        }
-      }
+  if (metod == "raking") {
+    
+    df <- kommun_mat %>%
+      left_join(justeringstabell %>% select(Kön, Ålder, År, Variabel, Lan_total), by = c("Kön", "Ålder", "År", "Variabel")) %>%
+      group_by(Region, Kön, Ålder, År, Variabel) %>%
+      summarise(Värde = sum(Värde), Lan_total = first(Lan_total), .groups = "drop")
+    
+    iter <- 0
+    konvergerat <- FALSE
+    
+    while (iter < max_iter && !konvergerat) {
+      iter <- iter + 1
+      
+      # Justera per kön
+      df <- df %>%
+        group_by(Kön, År, Variabel) %>%
+        mutate(faktor_kon = if_else(sum(Värde) > 0, Lan_total[1] / sum(Värde), 1),
+               Värde = Värde * faktor_kon) %>%
+        ungroup()
+      
+      # Justera per ålder
+      df <- df %>%
+        group_by(Ålder, År, Variabel) %>%
+        mutate(faktor_alder = if_else(sum(Värde) > 0, Lan_total[1] / sum(Värde), 1),
+               Värde = Värde * faktor_alder) %>%
+        ungroup()
+      
+      # Kontrollera konvergens
+      totalskillnad <- df %>%
+        group_by(Kön, Ålder, År, Variabel) %>%
+        summarise(Summa = sum(Värde), .groups = "drop") %>%
+        left_join(lan_mal, by = c("Kön", "Ålder", "År", "Variabel")) %>%
+        summarise(diff = sum(abs(Summa - Lan_total), na.rm = TRUE)) %>%
+        dplyr::pull(diff)
+      
+      konvergerat <- totalskillnad < tol
     }
+    
+    befintliga_kombinationer <- df %>%
+      select(Region, Kön, Ålder, År, Variabel) %>%
+      distinct()
+    
+    nya_rader_unika <- nya_rader %>%
+      anti_join(befintliga_kombinationer, by = c("Region", "Kön", "Ålder", "År", "Variabel"))
+    
+    kommun_final <- bind_rows(df, nya_rader_unika)
+    
+  } else if (metod == "antal_baserad_proportionell") {
+    
+    # Heuristik: om Värde ser ut som risk (<~1.5) behandla som risk, annars antal
+    is_risk <- max(komponent_data$Värde, na.rm = TRUE) <= 1.5
+    
+    # --- Bygg mix: länets ålders/könsfördelning per år ---
+    # 1) Försök ta den från kommunernas prognosbefolkning (summa över kommunerna)
+    mix <- tryCatch({
+      befolkningsprognos %>%                             # din prognosbefolkning per År/Ålder/Kön/Region
+        dplyr::filter(Region %in% kommuner) %>%
+        dplyr::group_by(År, Ålder, Kön) %>%
+        dplyr::summarise(n_mix = sum(Värde, na.rm = TRUE), .groups = "drop")
+    }, error = function(e) {
+      # 2) Fallback: rikets mix (utan Region-kolumn)
+      riket_lista$riket_prognosinvånare_grund %>%
+        dplyr::select(År, Ålder, Kön, n_mix = Värde)
+    })
+    
+    
+    # Antal = risk * mix (om risk); annars är Värde redan antal
+    to_antal <- function(df) {
+      df %>%
+        dplyr::left_join(mix, by = c("År","Ålder","Kön")) %>%
+        dplyr::mutate(antal = if (is_risk) Värde * n_mix else Värde)
+    }
+    
+    lan_ant <- to_antal(lan_data)
+    kom_ant <- to_antal(kommun_data)
+    
+    # Länets mål: totalsumma per år (och variabel)
+    lan_mal <- lan_ant %>%
+      dplyr::group_by(År, Variabel) %>%
+      dplyr::summarise(Lan_total = sum(antal, na.rm = TRUE), .groups = "drop")
+    
+    # Kommunernas totalsumma per år
+    kom_sum <- kom_ant %>%
+      dplyr::group_by(Region, År, Variabel) %>%
+      dplyr::summarise(Kommun_total = sum(antal, na.rm = TRUE), .groups = "drop")
+    
+    # Skalfaktor per år: mål / faktisk summa
+    faktor <- kom_sum %>%
+      dplyr::group_by(År, Variabel) %>%
+      dplyr::summarise(sum_kom = sum(Kommun_total, na.rm = TRUE), .groups = "drop") %>%
+      dplyr::left_join(lan_mal, by = c("År","Variabel")) %>%
+      dplyr::mutate(faktor = dplyr::if_else(sum_kom > 0, Lan_total / sum_kom, 1)) %>%
+      dplyr::select(År, Variabel, faktor)
+    
+    # Skala kommunernas antal proportionellt
+    kom_ant_adj <- kom_ant %>%
+      dplyr::left_join(faktor, by = c("År","Variabel")) %>%
+      dplyr::mutate(antal_adj = antal * dplyr::coalesce(faktor, 1))
+    
+    # Tillbaka till risk om det var risk från början
+    kommun_final <- kom_ant_adj %>%
+      dplyr::mutate(
+        Värde = if (is_risk) dplyr::if_else(n_mix > 0, antal_adj / n_mix, 0) else antal_adj
+      ) %>%
+      dplyr::select(Region, Kön, Ålder, År, Variabel, Värde)
+    
+  } else if (metod == "proportional") {
+    
+    # Proportionell justering (standard)
+    kommun_justerad <- kommun_data %>%
+      left_join(justeringstabell %>% select(Kön, Ålder, År, Variabel, Justeringsfaktor),
+                by = c("Kön", "Ålder", "År", "Variabel")) %>%
+      mutate(Värde = if_else(!is.na(Justeringsfaktor), round(Värde * Justeringsfaktor), Värde)) %>%
+      select(-Justeringsfaktor)
+    
+    befintliga_kombinationer <- kommun_justerad %>%
+      select(Region, Kön, Ålder, År, Variabel) %>%
+      distinct()
+    
+    nya_rader_unika <- nya_rader %>%
+      anti_join(befintliga_kombinationer, by = c("Region", "Kön", "Ålder", "År", "Variabel"))
+    
+    kommun_final <- bind_rows(kommun_justerad, nya_rader_unika)
+    
+  } else if (metod == "minsta_kvadrat") {
+    
+    kommun_justerad <- kommun_data %>%
+      left_join(lan_mal, by = c("Kön", "Ålder", "År", "Variabel")) %>%
+      group_by(Kön, Ålder, År, Variabel) %>%
+      group_modify(~ {
+        komm <- .x
+        
+        if (nrow(komm) == 0) return(komm)
+        
+        lan_tot <- first(komm$Lan_total)
+        
+        if (!is.na(lan_tot) && sum(komm$Värde) > 0) {
+          n <- nrow(komm)
+          Dmat <- diag(n)
+          dvec <- komm$Värde
+          Amat <- matrix(1, nrow = n)
+          bvec <- lan_tot
+          
+          res <- try(quadprog::solve.QP(Dmat, dvec, t(Amat), bvec, meq = 1), silent = TRUE)
+          if (!inherits(res, "try-error")) {
+            komm$Värde <- round(res$solution)
+          }
+        }
+        
+        komm
+      }) %>%
+      ungroup()
+    
+    befintliga_kombinationer <- kommun_justerad %>%
+      select(Region, Kön, Ålder, År, Variabel) %>%
+      distinct()
+    
+    nya_rader_unika <- nya_rader %>%
+      anti_join(befintliga_kombinationer, by = c("Region", "Kön", "Ålder", "År", "Variabel"))
+    
+    kommun_final <- bind_rows(kommun_justerad, nya_rader_unika)
+    
   }
   
   return(kommun_final)
 }
+
+
 
 # ===========================================================
 # HUVUDFUNKTION MED REGIONAL AVSTÄMNING
@@ -683,7 +1284,8 @@ gora_regional_befolkningsprognos <- function(
       fodda_resultat$fodda_rapport,
       lan_namn,
       kommuner,
-      "födda"
+      "födda", 
+      metod = metod_avstamning_regional
     )
     
     fodda_rapport_final <- bind_rows(
@@ -702,7 +1304,7 @@ gora_regional_befolkningsprognos <- function(
     doda <- berakna_doda(aktuell_befolkning, risktal$dodsrisker)
     
     # Avstäm döda
-    doda_kommun_justerad <- avstam_komponent_mot_lan(doda, lan_namn, kommuner, "döda")
+    doda_kommun_justerad <- avstam_komponent_mot_lan(doda, lan_namn, kommuner, "döda", metod = metod_avstamning_regional)
     doda_final <- bind_rows(
       doda %>% filter(Region == lan_namn),
       doda_kommun_justerad
@@ -762,7 +1364,7 @@ gora_regional_befolkningsprognos <- function(
     )
     
     # Avstäm invandring
-    invandring_kommun_justerad <- avstam_komponent_mot_lan(invandring, lan_namn, kommuner, "invandring")
+    invandring_kommun_justerad <- avstam_komponent_mot_lan(invandring, lan_namn, kommuner, "invandring", metod = metod_avstamning_regional)
     invandring_final <- bind_rows(
       invandring %>% filter(Region == lan_namn),
       invandring_kommun_justerad
@@ -775,7 +1377,7 @@ gora_regional_befolkningsprognos <- function(
     )
     
     # Avstäm utvandring
-    utvandring_kommun_justerad <- avstam_komponent_mot_lan(utvandring, lan_namn, kommuner, "utvandring")
+    utvandring_kommun_justerad <- avstam_komponent_mot_lan(utvandring, lan_namn, kommuner, "utvandring", metod = metod_avstamning_regional)
     utvandring_final <- bind_rows(
       utvandring %>% filter(Region == lan_namn),
       utvandring_kommun_justerad
@@ -923,14 +1525,14 @@ for (ar in prognos_ar_vektor) {
   lan_total <- regional_befolkningsprognos[[lan_namn]]$totalbefolkning %>%
     filter(År == ar) %>%
     summarise(Lan_total = sum(Värde, na.rm = TRUE)) %>%
-    pull(Lan_total)
+    dplyr::pull(Lan_total)
   
   # Summa av kommuner
   kommun_summa <- map_dbl(kommuner, function(kommun) {
     regional_befolkningsprognos[[kommun]]$totalbefolkning %>%
       filter(År == ar) %>%
       summarise(tot = sum(Värde, na.rm = TRUE)) %>%
-      pull(tot)
+      dplyr::pull(tot)
   }) %>% sum()
   
   avstamning_tabell <- bind_rows(
@@ -963,13 +1565,13 @@ for (komp in komponenter) {
   # Länstotal
   lan_komp <- regional_befolkningsprognos[[lan_namn]]$komponenter[[komponentavstamningsar]][[komp]] %>%
     summarise(Lan_total = sum(Värde, na.rm = TRUE)) %>%
-    pull(Lan_total)
+    dplyr::pull(Lan_total)
   
   # Kommunsumma
   kommun_komp_summa <- map_dbl(kommuner, function(kommun) {
     regional_befolkningsprognos[[kommun]]$komponenter[[komponentavstamningsar]][[komp]] %>%
       summarise(tot = sum(Värde, na.rm = TRUE)) %>%
-      pull(tot)
+      dplyr::pull(tot)
   }) %>% sum()
   
   komponent_avstamning <- bind_rows(
